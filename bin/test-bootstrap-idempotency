@@ -20,10 +20,30 @@ common_flags=(
   --skip-auth-import
 )
 
-export AI_COUNSEL_RUNTIME_ROOT="${TMP_DIR}/runtime-root"
-
 echo "[test] first run"
 "${BOOTSTRAP}" "${common_flags[@]}"
+
+expected_runtime_key="$(python3 - "${PROJECT_DIR}" <<'PY'
+import hashlib, os, re, sys
+p = os.path.abspath(sys.argv[1])
+base = os.path.basename(p.rstrip(os.sep)) or "project"
+safe = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "project"
+h = hashlib.sha1(p.encode()).hexdigest()[:12]
+print(f"{safe}-{h}")
+PY
+)"
+expected_runtime_base="${PROJECT_DIR}/.cache/ai-counsel-mcp/${expected_runtime_key}"
+
+for d in \
+  "${expected_runtime_base}/codex" \
+  "${expected_runtime_base}/gemini" \
+  "${expected_runtime_base}/opencode/share" \
+  "${expected_runtime_base}/opencode/config" \
+  "${expected_runtime_base}/claude/dot_claude" \
+  "${expected_runtime_base}/claude/claude_code" \
+  "${expected_runtime_base}/gcloud"; do
+  test -d "${d}" || { echo "[test][error] missing runtime dir: ${d}" >&2; exit 1; }
+done
 
 for f in \
   "${PROJECT_DIR}/.ai-counsel/config.yaml" \

@@ -9,7 +9,10 @@ This toolbox runs CLIs **inside** the container, but persists auth state **per p
 - gcloud ADC (optional): `/home/app/.config/gcloud`
 
 The wrapper mounts these from:
-`~/.cache/ai-counsel-mcp/<project-hash>/...`
+`<project>/.cache/ai-counsel-mcp/<basename>-<short-hash>/...`
+
+Override root path if needed:
+- set `AI_COUNSEL_RUNTIME_ROOT` before running `mcp-ai-counsel` or `bin/bootstrap`
 
 ## Recommended workflow
 1. In your project repo, create `.ai-counsel/env` for API keys (if you use keys).
@@ -45,4 +48,3 @@ Claude Code auth methods vary by deployment (Teams/Enterprise, Console, Bedrock,
 
 If you run Claude Code CLI locally on the host, it can still call this toolbox MCP server.  
 If you also run `claude` inside the container, mount its config/auth dirs (the wrapper already creates per-project mounts for this).
-

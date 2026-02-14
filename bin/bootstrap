@@ -316,13 +316,17 @@ copy_if_missing "${ROOT}/config/ai-counsel/config.yaml" "${AI_DIR}/config.yaml"
 copy_if_missing "${ROOT}/.env.example" "${AI_DIR}/env"
 ensure_gitignore_entry "${PROJECT_DIR}/.gitignore"
 
-KEY="$(python3 - "${PROJECT_DIR}" <<'PY'
-import hashlib, sys
-print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:12])
+RUNTIME_KEY="$(python3 - "${PROJECT_DIR}" <<'PY'
+import hashlib, os, re, sys
+p = os.path.abspath(sys.argv[1])
+base = os.path.basename(p.rstrip(os.sep)) or "project"
+safe = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "project"
+h = hashlib.sha1(p.encode()).hexdigest()[:12]
+print(f"{safe}-{h}")
 PY
 )"
-RUNTIME_ROOT="${AI_COUNSEL_RUNTIME_ROOT:-${HOME}/.cache/ai-counsel-mcp}"
-RUNTIME_BASE="${RUNTIME_ROOT}/${KEY}"
+RUNTIME_ROOT="${AI_COUNSEL_RUNTIME_ROOT:-${PROJECT_DIR}/.cache/ai-counsel-mcp}"
+RUNTIME_BASE="${RUNTIME_ROOT}/${RUNTIME_KEY}"
 
 for d in \
   "${RUNTIME_BASE}/codex" \

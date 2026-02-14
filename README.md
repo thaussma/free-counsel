@@ -36,6 +36,10 @@ What it does:
 If host auth for a provider is missing, bootstrap prints a warning.  
 Authenticate on host, then rerun `./bin/bootstrap`.
 
+Runtime/auth cache default location:
+- `<project>/.cache/ai-counsel-mcp/<basename>-<short-hash>/...`
+- override with `AI_COUNSEL_RUNTIME_ROOT` if needed
+
 Common options:
 ```bash
 ./bin/bootstrap --build-mode default

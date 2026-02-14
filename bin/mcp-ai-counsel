@@ -12,13 +12,19 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SELF_DIR}/.." && pwd)"
 PROJECT_DIR="${PWD}"
 
-# Hash project directory to isolate auth/caches per project
-KEY="$(python3 - <<'PY'
-import hashlib, os
-print(hashlib.sha1(os.getcwd().encode()).hexdigest()[:12])
+# Isolate auth/caches per project under project-local cache by default.
+# Naming format: <sanitized-basename>-<short-hash>.
+RUNTIME_KEY="$(python3 - "${PROJECT_DIR}" <<'PY'
+import hashlib, os, re, sys
+p = os.path.abspath(sys.argv[1])
+base = os.path.basename(p.rstrip(os.sep)) or "project"
+safe = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "project"
+h = hashlib.sha1(p.encode()).hexdigest()[:12]
+print(f"{safe}-{h}")
 PY
 )"
-RUNTIME_BASE="${HOME}/.cache/ai-counsel-mcp/${KEY}"
+RUNTIME_ROOT="${AI_COUNSEL_RUNTIME_ROOT:-${PROJECT_DIR}/.cache/ai-counsel-mcp}"
+RUNTIME_BASE="${RUNTIME_ROOT}/${RUNTIME_KEY}"
 
 mkdir -p   "${RUNTIME_BASE}/codex"   "${RUNTIME_BASE}/gemini"   "${RUNTIME_BASE}/opencode/share"   "${RUNTIME_BASE}/opencode/config"   "${RUNTIME_BASE}/claude/dot_claude"   "${RUNTIME_BASE}/claude/claude_code"   "${RUNTIME_BASE}/gcloud"
 
