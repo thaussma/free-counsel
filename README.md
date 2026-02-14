@@ -22,7 +22,7 @@ Then you use a **global wrapper** (`mcp-ai-counsel`) to expose AI Counsel as an 
 ### 1) One-command bootstrap (recommended)
 ```bash
 cd ~/src/ai-counsel-mcp-toolbox
-./bin/bootstrap
+./bin/bootstrap /path/to/project
 ```
 
 What it does:
@@ -39,14 +39,16 @@ Authenticate on host, then rerun `./bin/bootstrap`.
 Runtime/auth cache default location:
 - `<project>/.cache/ai-counsel-mcp/<basename>-<short-hash>/...`
 - override with `AI_COUNSEL_RUNTIME_ROOT` if needed
+- bootstrap shows an execution summary and requires `yes` confirmation before applying changes
 
 Common options:
 ```bash
-./bin/bootstrap --build-mode default
-./bin/bootstrap --build-mode optimized-full
-./bin/bootstrap --clients claude,codex
-./bin/bootstrap --force
-./bin/bootstrap --dry-run
+./bin/bootstrap /path/to/project --build-mode default
+./bin/bootstrap /path/to/project --build-mode optimized-full
+./bin/bootstrap /path/to/project --clients claude,codex
+./bin/bootstrap /path/to/project --force
+./bin/bootstrap /path/to/project --dry-run
+./bin/bootstrap /path/to/project --yes
 ```
 
 ### 2) Manual build path (optional)

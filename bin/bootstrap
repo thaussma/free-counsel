@@ -3,10 +3,9 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bin/bootstrap [options]
+Usage: bin/bootstrap <PROJECT_DIR> [options]
 
 Options:
-  --project-dir <path>                 Target project directory (default: current directory)
   --clients <list>                     Comma-separated: claude,codex,gemini,opencode (default: all)
   --build-mode <mode>                  default|optimized|optimized-full (default: optimized)
   --skip-vendor                        Skip ./bin/vendor-ai-counsel
@@ -14,6 +13,7 @@ Options:
   --skip-wrapper                       Skip ./bin/install-global-wrapper
   --skip-auth-import                   Skip host auth import into per-project runtime dirs
   --force                              Overwrite existing client config files (with backups)
+  --yes                                Skip interactive confirmation prompt
   --dry-run                            Print actions without changing files
   -h, --help                           Show this help
 EOF
@@ -183,7 +183,7 @@ sync_auth_dir() {
   AUTH_IMPORTED_LABELS+=("${label}")
 }
 
-PROJECT_DIR="${PWD}"
+PROJECT_DIR=""
 CLIENTS_RAW="claude,codex,gemini,opencode"
 BUILD_MODE="optimized"
 SKIP_VENDOR=0
@@ -191,14 +191,11 @@ SKIP_BUILD=0
 SKIP_WRAPPER=0
 SKIP_AUTH_IMPORT=0
 FORCE=0
+ASSUME_YES=0
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project-dir)
-      PROJECT_DIR="$2"
-      shift 2
-      ;;
     --clients)
       CLIENTS_RAW="$2"
       shift 2
@@ -227,6 +224,10 @@ while [[ $# -gt 0 ]]; do
       FORCE=1
       shift
       ;;
+    --yes)
+      ASSUME_YES=1
+      shift
+      ;;
     --dry-run)
       DRY_RUN=1
       shift
@@ -235,11 +236,23 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    *)
+    -*)
       err "Unknown option: $1"
+      ;;
+    *)
+      if [[ -n "${PROJECT_DIR}" ]]; then
+        err "Multiple project directories provided: '${PROJECT_DIR}' and '$1'"
+      fi
+      PROJECT_DIR="$1"
+      shift
       ;;
   esac
 done
+
+if [[ -z "${PROJECT_DIR}" ]]; then
+  usage
+  err "Missing required PROJECT_DIR positional argument"
+fi
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SELF_DIR}/.." && pwd)"
@@ -288,6 +301,74 @@ if [[ ! -f "${ROOT}/config/ai-counsel/config.yaml" ]]; then
   err "Missing ${ROOT}/config/ai-counsel/config.yaml"
 fi
 
+RUNTIME_KEY="$(python3 - "${PROJECT_DIR}" <<'PY'
+import hashlib, os, re, sys
+p = os.path.abspath(sys.argv[1])
+base = os.path.basename(p.rstrip(os.sep)) or "project"
+safe = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "project"
+h = hashlib.sha1(p.encode()).hexdigest()[:12]
+print(f"{safe}-{h}")
+PY
+)"
+RUNTIME_ROOT="${AI_COUNSEL_RUNTIME_ROOT:-${PROJECT_DIR}/.cache/ai-counsel-mcp}"
+RUNTIME_BASE="${RUNTIME_ROOT}/${RUNTIME_KEY}"
+
+log "Execution summary:"
+log "  project: ${PROJECT_DIR}"
+log "  build_mode: ${BUILD_MODE}"
+log "  clients: ${CLIENTS_RAW}"
+log "  runtime_base: ${RUNTIME_BASE}"
+log "  steps:"
+if [[ "${SKIP_VENDOR}" -eq 0 ]]; then
+  log "    - vendor/update ai-counsel"
+else
+  log "    - vendor/update ai-counsel (skipped)"
+fi
+if [[ "${SKIP_BUILD}" -eq 0 ]]; then
+  log "    - build image ai-counsel-mcp:latest"
+else
+  log "    - build image ai-counsel-mcp:latest (skipped)"
+fi
+if [[ "${SKIP_WRAPPER}" -eq 0 ]]; then
+  log "    - install wrapper symlink"
+else
+  log "    - install wrapper symlink (skipped)"
+fi
+if [[ "${SKIP_AUTH_IMPORT}" -eq 0 ]]; then
+  log "    - import auth from host (missing sources are non-blocking)"
+else
+  log "    - import auth from host (skipped)"
+fi
+log "    - scaffold .ai-counsel files and MCP configs"
+log "  target files:"
+log "    - ${PROJECT_DIR}/.ai-counsel/config.yaml"
+log "    - ${PROJECT_DIR}/.ai-counsel/env"
+log "    - ${PROJECT_DIR}/.gitignore (ensure .ai-counsel/ entry)"
+if contains_client "claude"; then
+  log "    - ${PROJECT_DIR}/.mcp.json"
+fi
+if contains_client "codex"; then
+  log "    - ${PROJECT_DIR}/.codex/config.toml"
+fi
+if contains_client "gemini"; then
+  log "    - ${PROJECT_DIR}/.gemini/settings.json"
+fi
+if contains_client "opencode"; then
+  log "    - ${PROJECT_DIR}/opencode.json"
+fi
+
+if [[ "${ASSUME_YES}" -ne 1 && "${DRY_RUN}" -ne 1 ]]; then
+  if [[ ! -t 0 ]]; then
+    err "Interactive confirmation required. Re-run with --yes for non-interactive usage."
+  fi
+  printf '[bootstrap] Proceed? Type "yes" to continue: '
+  read -r reply
+  if [[ "${reply}" != "yes" ]]; then
+    log "Aborted by user."
+    exit 1
+  fi
+fi
+
 if [[ "${SKIP_VENDOR}" -eq 0 ]]; then
   log "Running vendor sync"
   run_cmd "${ROOT}/bin/vendor-ai-counsel"
@@ -320,18 +401,6 @@ mkdir_safe "${AI_DIR}"
 copy_if_missing "${ROOT}/config/ai-counsel/config.yaml" "${AI_DIR}/config.yaml"
 copy_if_missing "${ROOT}/.env.example" "${AI_DIR}/env"
 ensure_gitignore_entry "${PROJECT_DIR}/.gitignore"
-
-RUNTIME_KEY="$(python3 - "${PROJECT_DIR}" <<'PY'
-import hashlib, os, re, sys
-p = os.path.abspath(sys.argv[1])
-base = os.path.basename(p.rstrip(os.sep)) or "project"
-safe = re.sub(r"[^A-Za-z0-9._-]+", "-", base).strip("-") or "project"
-h = hashlib.sha1(p.encode()).hexdigest()[:12]
-print(f"{safe}-{h}")
-PY
-)"
-RUNTIME_ROOT="${AI_COUNSEL_RUNTIME_ROOT:-${PROJECT_DIR}/.cache/ai-counsel-mcp}"
-RUNTIME_BASE="${RUNTIME_ROOT}/${RUNTIME_KEY}"
 
 for d in \
   "${RUNTIME_BASE}/codex" \
