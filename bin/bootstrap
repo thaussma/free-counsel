@@ -23,6 +23,9 @@ log() { printf '[bootstrap] %s\n' "$*"; }
 warn() { printf '[bootstrap][warn] %s\n' "$*" >&2; }
 err() { printf '[bootstrap][error] %s\n' "$*" >&2; exit 1; }
 
+AUTH_IMPORTED_LABELS=()
+AUTH_MISSING_LABELS=()
+
 require_cmd() {
   local cmd="$1"
   command -v "${cmd}" >/dev/null 2>&1 || err "Missing required command: ${cmd}"
@@ -166,6 +169,7 @@ sync_auth_dir() {
 
   if [[ ! -d "${source}" ]]; then
     warn "${label} auth not found on host (${source}). Authenticate on host, then rerun bin/bootstrap."
+    AUTH_MISSING_LABELS+=("${label}")
     return 0
   fi
 
@@ -176,6 +180,7 @@ sync_auth_dir() {
 
   cp -a "${source}/." "${dest}/"
   log "Imported ${label} auth: ${source} -> ${dest}"
+  AUTH_IMPORTED_LABELS+=("${label}")
 }
 
 PROJECT_DIR="${PWD}"
@@ -348,6 +353,18 @@ if [[ "${SKIP_AUTH_IMPORT}" -eq 0 ]]; then
   sync_auth_dir "${HOME}/.config/gcloud" "${RUNTIME_BASE}/gcloud" "gcloud"
 else
   log "Skipping auth import (--skip-auth-import)"
+fi
+
+if [[ "${SKIP_AUTH_IMPORT}" -eq 0 ]]; then
+  local_imported_count="${#AUTH_IMPORTED_LABELS[@]}"
+  local_missing_count="${#AUTH_MISSING_LABELS[@]}"
+  log "Auth import summary: imported=${local_imported_count}, missing_optional=${local_missing_count}"
+  if [[ "${local_imported_count}" -gt 0 ]]; then
+    log "Imported providers: ${AUTH_IMPORTED_LABELS[*]}"
+  fi
+  if [[ "${local_missing_count}" -gt 0 ]]; then
+    log "Missing providers (non-blocking): ${AUTH_MISSING_LABELS[*]}"
+  fi
 fi
 
 CLAUDE_JSON='{
