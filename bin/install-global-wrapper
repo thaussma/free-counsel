@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mkdir -p "${HOME}/bin"
+
+ln -sf "${ROOT}/bin/mcp-ai-counsel" "${HOME}/bin/mcp-ai-counsel"
+
+echo "Installed: ${HOME}/bin/mcp-ai-counsel -> ${ROOT}/bin/mcp-ai-counsel"
+echo "If needed, add ~/bin to PATH (zsh):"
+echo '  echo "export PATH=\"$HOME/bin:$PATH\"" >> ~/.zshrc && source ~/.zshrc'

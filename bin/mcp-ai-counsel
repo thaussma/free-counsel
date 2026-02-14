@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage:
+#   mcp-ai-counsel              # run MCP server over stdio (default)
+#   mcp-ai-counsel --shell      # open an interactive shell in the same per-project environment
+#   mcp-ai-counsel --rebuild    # rebuild ai-counsel-mcp:latest image (uses toolbox repo)
+#
+# This script is intended to be symlinked into ~/bin, so MCP clients can call it.
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+PROJECT_DIR="${PWD}"
+
+# Hash project directory to isolate auth/caches per project
+KEY="$(python3 - <<'PY'
+import hashlib, os
+print(hashlib.sha1(os.getcwd().encode()).hexdigest()[:12])
+PY
+)"
+RUNTIME_BASE="${HOME}/.cache/ai-counsel-mcp/${KEY}"
+
+mkdir -p   "${RUNTIME_BASE}/codex"   "${RUNTIME_BASE}/gemini"   "${RUNTIME_BASE}/opencode/share"   "${RUNTIME_BASE}/opencode/config"   "${RUNTIME_BASE}/claude/dot_claude"   "${RUNTIME_BASE}/claude/claude_code"   "${RUNTIME_BASE}/gcloud"
+
+# Project-level optional overrides (gitignored in the project)
+PROJECT_CFG="${PROJECT_DIR}/.ai-counsel/config.yaml"
+DEFAULT_CFG="${ROOT}/config/ai-counsel/config.yaml"
+CFG="${DEFAULT_CFG}"
+if [ -f "${PROJECT_CFG}" ]; then
+  CFG="${PROJECT_CFG}"
+fi
+
+PROJECT_ENV="${PROJECT_DIR}/.ai-counsel/env"
+ENV_FILE_ARG=()
+if [ -f "${PROJECT_ENV}" ]; then
+  ENV_FILE_ARG=(--env-file "${PROJECT_ENV}")
+fi
+
+IMAGE="ai-counsel-mcp:latest"
+
+if [ "${1:-}" = "--rebuild" ]; then
+  (cd "${ROOT}" && ./bin/vendor-ai-counsel && docker build -t "${IMAGE}" .)
+  exit 0
+fi
+
+# For interactive auth/debug inside the same mounts:
+SHELL_MODE=0
+if [ "${1:-}" = "--shell" ]; then
+  SHELL_MODE=1
+  shift
+fi
+
+DOCKER_ARGS=(
+  --rm
+  -i
+  "${ENV_FILE_ARG[@]}"
+  -v "${PROJECT_DIR}:/work:rw"
+  -v "${CFG}:/opt/ai-counsel/config.yaml:ro"
+  -v "${RUNTIME_BASE}/codex:/home/app/.codex:rw"
+  -v "${RUNTIME_BASE}/gemini:/home/app/.gemini:rw"
+  -v "${RUNTIME_BASE}/opencode/share:/home/app/.local/share/opencode:rw"
+  -v "${RUNTIME_BASE}/opencode/config:/home/app/.config/opencode:rw"
+  -v "${RUNTIME_BASE}/claude/dot_claude:/home/app/.claude:rw"
+  -v "${RUNTIME_BASE}/claude/claude_code:/home/app/.config/claude-code:rw"
+  -v "${RUNTIME_BASE}/gcloud:/home/app/.config/gcloud:rw"
+  -w /opt/ai-counsel
+)
+
+if [ "${SHELL_MODE}" -eq 1 ]; then
+  exec docker run -it "${DOCKER_ARGS[@]}" "${IMAGE}" bash
+else
+  # stdio MCP server (no TTY)
+  exec docker run "${DOCKER_ARGS[@]}" "${IMAGE}"
+fi

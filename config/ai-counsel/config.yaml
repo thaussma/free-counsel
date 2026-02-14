@@ -1,0 +1,38 @@
+# AI Counsel default configuration for CLI-based adapters.
+# This file is intentionally minimal.
+# See upstream AI Counsel docs for all options.
+
+adapters:
+  # Claude Code CLI (disable hooks by default for safety)
+  claude:
+    type: cli
+    command: "claude"
+    args: ["-p", "--model", "{model}", "--settings", "{\"disableAllHooks\": true}", "{prompt}"]
+    timeout: 300
+
+  # OpenAI Codex CLI (non-interactive)
+  codex:
+    type: cli
+    command: "codex"
+    args: ["exec", "--model", "{model}", "{prompt}"]
+    timeout: 600
+
+  # Google Gemini CLI (non-interactive prompt)
+  gemini:
+    type: cli
+    command: "gemini"
+    args: ["-p", "--model", "{model}", "{prompt}"]
+    timeout: 600
+
+  # OpenCode CLI (model is typically selected via OpenCode config/auth)
+  # If you want explicit model selection, prefer setting OpenCode default model in its config.
+  opencode:
+    type: cli
+    command: "opencode"
+    args: ["run", "{prompt}"]
+    timeout: 900
+
+defaults:
+  mode: "quick"
+  rounds: 2
+  max_rounds: 5

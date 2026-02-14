@@ -1,0 +1,17 @@
+# Local build + runtime
+vendor/ai-counsel/
+!.keep
+.runtime/
+runtime/
+.env
+.env.*
+**/__pycache__/
+**/.pytest_cache/
+**/.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log

@@ -1,0 +1,21 @@
+services:
+  ai-counsel-mcp:
+    build: .
+    image: ai-counsel-mcp:latest
+    working_dir: /opt/ai-counsel
+    stdin_open: true
+    tty: false
+    environment:
+      - HOME=/home/app
+    volumes:
+      # Project workspace (defaults to current directory; override with PROJECT_DIR)
+      - ${PROJECT_DIR:-.}:/work:rw
+      # Default AI Counsel config (override by bind-mounting your own)
+      - ./config/ai-counsel/config.yaml:/opt/ai-counsel/config.yaml:ro
+
+      # Runtime/auth mounts (override with RUNTIME_DIR)
+      - ${RUNTIME_DIR:-./runtime}/codex:/home/app/.codex:rw
+      - ${RUNTIME_DIR:-./runtime}/gemini:/home/app/.gemini:rw
+      - ${RUNTIME_DIR:-./runtime}/opencode/share:/home/app/.local/share/opencode:rw
+      - ${RUNTIME_DIR:-./runtime}/opencode/config:/home/app/.config/opencode:rw
+      - ${RUNTIME_DIR:-./runtime}/gcloud:/home/app/.config/gcloud:rw

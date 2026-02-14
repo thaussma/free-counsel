@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Vendors AI Counsel into vendor/ai-counsel so Dockerfile can COPY it.
+# This repo intentionally does NOT ship the upstream code in the zip.
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEST="${ROOT}/vendor/ai-counsel"
+
+if [ -d "${DEST}/.git" ]; then
+  echo "Updating existing vendor/ai-counsel..."
+  git -C "${DEST}" fetch --all --prune
+  git -C "${DEST}" checkout main || true
+  git -C "${DEST}" pull --ff-only || true
+  exit 0
+fi
+
+echo "Cloning AI Counsel into ${DEST} ..."
+mkdir -p "${ROOT}/vendor"
+git clone https://github.com/blueman82/ai-counsel.git "${DEST}"
