@@ -19,7 +19,33 @@ Then you use a **global wrapper** (`mcp-ai-counsel`) to expose AI Counsel as an 
 - Docker Desktop (macOS)
 - A modern shell (zsh/bash)
 
-### 1) Build the image
+### 1) One-command bootstrap (recommended)
+```bash
+cd ~/src/ai-counsel-mcp-toolbox
+./bin/bootstrap
+```
+
+What it does:
+- vendors/updates AI Counsel
+- builds `ai-counsel-mcp:latest` (optimized mode by default)
+- installs `mcp-ai-counsel` wrapper
+- creates project-local `.ai-counsel/config.yaml` and `.ai-counsel/env` from `.env.example`
+- creates MCP config files for Claude/Codex/Gemini/OpenCode (create-only by default)
+- imports host auth into this project's isolated runtime mounts
+
+If host auth for a provider is missing, bootstrap prints a warning.  
+Authenticate on host, then rerun `./bin/bootstrap`.
+
+Common options:
+```bash
+./bin/bootstrap --build-mode default
+./bin/bootstrap --build-mode optimized-full
+./bin/bootstrap --clients claude,codex
+./bin/bootstrap --force
+./bin/bootstrap --dry-run
+```
+
+### 2) Manual build path (optional)
 ```bash
 cd ~/src/ai-counsel-mcp-toolbox
 ./bin/vendor-ai-counsel   # clones AI Counsel into vendor/ai-counsel (or updates it)
@@ -38,7 +64,7 @@ docker build -f Dockerfile.optimized \
   -t ai-counsel-mcp:latest .
 ```
 
-### 2) Install the global wrapper
+### 3) Install the global wrapper
 ```bash
 ./bin/install-global-wrapper
 # then ensure ~/bin is on PATH (zsh default often includes it; if not, add it)
@@ -47,7 +73,7 @@ docker build -f Dockerfile.optimized \
 This creates a symlink:
 - `~/bin/mcp-ai-counsel` → `<this-repo>/bin/mcp-ai-counsel`
 
-### 3) In any project: add MCP config that calls `mcp-ai-counsel`
+### 4) In any project: add MCP config that calls `mcp-ai-counsel`
 
 #### Claude Code (project `.mcp.json`)
 ```json

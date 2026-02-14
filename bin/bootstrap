@@ -1,0 +1,397 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/bootstrap [options]
+
+Options:
+  --project-dir <path>                 Target project directory (default: current directory)
+  --clients <list>                     Comma-separated: claude,codex,gemini,opencode (default: all)
+  --build-mode <mode>                  default|optimized|optimized-full (default: optimized)
+  --skip-vendor                        Skip ./bin/vendor-ai-counsel
+  --skip-build                         Skip docker build
+  --skip-wrapper                       Skip ./bin/install-global-wrapper
+  --skip-auth-import                   Skip host auth import into per-project runtime dirs
+  --force                              Overwrite existing client config files (with backups)
+  --dry-run                            Print actions without changing files
+  -h, --help                           Show this help
+EOF
+}
+
+log() { printf '[bootstrap] %s\n' "$*"; }
+warn() { printf '[bootstrap][warn] %s\n' "$*" >&2; }
+err() { printf '[bootstrap][error] %s\n' "$*" >&2; exit 1; }
+
+require_cmd() {
+  local cmd="$1"
+  command -v "${cmd}" >/dev/null 2>&1 || err "Missing required command: ${cmd}"
+}
+
+contains_client() {
+  local needle="$1"
+  local c
+  for c in "${CLIENTS[@]}"; do
+    if [[ "${c}" == "${needle}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+run_cmd() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "DRY-RUN: $*"
+    return 0
+  fi
+  "$@"
+}
+
+mkdir_safe() {
+  local dir="$1"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "DRY-RUN: mkdir -p ${dir}"
+  else
+    mkdir -p "${dir}"
+  fi
+}
+
+copy_if_missing() {
+  local src="$1"
+  local dest="$2"
+  if [[ -f "${dest}" ]]; then
+    log "Exists, skipping: ${dest}"
+    return 0
+  fi
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "DRY-RUN: copy ${src} -> ${dest}"
+    return 0
+  fi
+  cp "${src}" "${dest}"
+  log "Created: ${dest}"
+}
+
+ensure_gitignore_entry() {
+  local gitignore="$1"
+  local entry=".ai-counsel/"
+  if [[ -f "${gitignore}" ]] && rg -n '^\.ai-counsel/?$' "${gitignore}" >/dev/null 2>&1; then
+    log "Found gitignore entry in ${gitignore}: ${entry}"
+    return 0
+  fi
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    if [[ -f "${gitignore}" ]]; then
+      log "DRY-RUN: append ${entry} to ${gitignore}"
+    else
+      log "DRY-RUN: create ${gitignore} with ${entry}"
+    fi
+    return 0
+  fi
+  printf '%s\n' "${entry}" >> "${gitignore}"
+  log "Updated ${gitignore}: added ${entry}"
+}
+
+validate_json_file() {
+  local path="$1"
+  jq empty "${path}" >/dev/null
+}
+
+validate_toml_file() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as f:
+    tomllib.load(f)
+PY
+}
+
+write_config_file() {
+  local path="$1"
+  local format="$2" # json|toml
+  local content="$3"
+  local label="$4"
+  local timestamp
+  timestamp="$(date +%Y%m%d%H%M%S)"
+
+  if [[ -f "${path}" && "${FORCE}" -ne 1 ]]; then
+    log "Exists, skipping (${label}): ${path}"
+    return 0
+  fi
+
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    if [[ -f "${path}" ]]; then
+      log "DRY-RUN: backup ${path} -> ${path}.bak.${timestamp}"
+      log "DRY-RUN: overwrite (${label}) ${path}"
+    else
+      log "DRY-RUN: create (${label}) ${path}"
+    fi
+    return 0
+  fi
+
+  mkdir -p "$(dirname "${path}")"
+
+  if [[ -f "${path}" ]]; then
+    cp "${path}" "${path}.bak.${timestamp}"
+    log "Backed up ${path} -> ${path}.bak.${timestamp}"
+  fi
+
+  local tmp
+  tmp="$(mktemp "${path}.tmp.XXXXXX")"
+  printf '%s\n' "${content}" > "${tmp}"
+
+  if [[ "${format}" == "json" ]]; then
+    validate_json_file "${tmp}" || {
+      rm -f "${tmp}"
+      err "JSON validation failed for ${label} (${path})"
+    }
+  elif [[ "${format}" == "toml" ]]; then
+    validate_toml_file "${tmp}" || {
+      rm -f "${tmp}"
+      err "TOML validation failed for ${label} (${path})"
+    }
+  else
+    rm -f "${tmp}"
+    err "Unknown format '${format}' for ${path}"
+  fi
+
+  mv "${tmp}" "${path}"
+  log "Wrote ${label}: ${path}"
+}
+
+sync_auth_dir() {
+  local source="$1"
+  local dest="$2"
+  local label="$3"
+
+  mkdir_safe "${dest}"
+
+  if [[ ! -d "${source}" ]]; then
+    warn "${label} auth not found on host (${source}). Authenticate on host, then rerun bin/bootstrap."
+    return 0
+  fi
+
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "DRY-RUN: copy ${source}/. -> ${dest}/"
+    return 0
+  fi
+
+  cp -a "${source}/." "${dest}/"
+  log "Imported ${label} auth: ${source} -> ${dest}"
+}
+
+PROJECT_DIR="${PWD}"
+CLIENTS_RAW="claude,codex,gemini,opencode"
+BUILD_MODE="optimized"
+SKIP_VENDOR=0
+SKIP_BUILD=0
+SKIP_WRAPPER=0
+SKIP_AUTH_IMPORT=0
+FORCE=0
+DRY_RUN=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project-dir)
+      PROJECT_DIR="$2"
+      shift 2
+      ;;
+    --clients)
+      CLIENTS_RAW="$2"
+      shift 2
+      ;;
+    --build-mode)
+      BUILD_MODE="$2"
+      shift 2
+      ;;
+    --skip-vendor)
+      SKIP_VENDOR=1
+      shift
+      ;;
+    --skip-build)
+      SKIP_BUILD=1
+      shift
+      ;;
+    --skip-wrapper)
+      SKIP_WRAPPER=1
+      shift
+      ;;
+    --skip-auth-import)
+      SKIP_AUTH_IMPORT=1
+      shift
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      err "Unknown option: $1"
+      ;;
+  esac
+done
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+PROJECT_DIR="$(cd "${PROJECT_DIR}" && pwd)"
+
+IFS=',' read -r -a CLIENTS <<< "${CLIENTS_RAW}"
+if [[ "${#CLIENTS[@]}" -eq 0 ]]; then
+  err "No clients selected. Use --clients claude,codex,gemini,opencode"
+fi
+
+for client in "${CLIENTS[@]}"; do
+  case "${client}" in
+    claude|codex|gemini|opencode) ;;
+    *)
+      err "Invalid client '${client}'. Allowed: claude,codex,gemini,opencode"
+      ;;
+  esac
+done
+
+case "${BUILD_MODE}" in
+  default|optimized|optimized-full) ;;
+  *) err "Invalid --build-mode '${BUILD_MODE}'. Allowed: default|optimized|optimized-full" ;;
+esac
+
+require_cmd bash
+require_cmd python3
+require_cmd jq
+require_cmd rg
+require_cmd git
+if [[ "${SKIP_BUILD}" -eq 0 ]]; then
+  require_cmd docker
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "DRY-RUN: skipping docker daemon connectivity check"
+  else
+    docker info >/dev/null 2>&1 || err "Docker daemon is not reachable. Start Docker Desktop and retry."
+  fi
+fi
+
+if [[ ! -d "${ROOT}/.git" ]]; then
+  err "Expected git repo at ${ROOT}"
+fi
+if [[ ! -f "${ROOT}/.env.example" ]]; then
+  err "Missing ${ROOT}/.env.example"
+fi
+if [[ ! -f "${ROOT}/config/ai-counsel/config.yaml" ]]; then
+  err "Missing ${ROOT}/config/ai-counsel/config.yaml"
+fi
+
+if [[ "${SKIP_VENDOR}" -eq 0 ]]; then
+  log "Running vendor sync"
+  run_cmd "${ROOT}/bin/vendor-ai-counsel"
+else
+  log "Skipping vendor sync (--skip-vendor)"
+fi
+
+if [[ "${SKIP_BUILD}" -eq 0 ]]; then
+  log "Building image (mode=${BUILD_MODE})"
+  if [[ "${BUILD_MODE}" == "default" ]]; then
+    run_cmd docker build -t ai-counsel-mcp:latest "${ROOT}"
+  elif [[ "${BUILD_MODE}" == "optimized" ]]; then
+    run_cmd docker build -f "${ROOT}/Dockerfile.optimized" -t ai-counsel-mcp:latest "${ROOT}"
+  else
+    run_cmd docker build -f "${ROOT}/Dockerfile.optimized" --build-arg AI_COUNSEL_INCLUDE_HEAVY_DEPS=1 -t ai-counsel-mcp:latest "${ROOT}"
+  fi
+else
+  log "Skipping image build (--skip-build)"
+fi
+
+if [[ "${SKIP_WRAPPER}" -eq 0 ]]; then
+  log "Installing global wrapper"
+  run_cmd "${ROOT}/bin/install-global-wrapper"
+else
+  log "Skipping wrapper install (--skip-wrapper)"
+fi
+
+AI_DIR="${PROJECT_DIR}/.ai-counsel"
+mkdir_safe "${AI_DIR}"
+copy_if_missing "${ROOT}/config/ai-counsel/config.yaml" "${AI_DIR}/config.yaml"
+copy_if_missing "${ROOT}/.env.example" "${AI_DIR}/env"
+ensure_gitignore_entry "${PROJECT_DIR}/.gitignore"
+
+KEY="$(python3 - "${PROJECT_DIR}" <<'PY'
+import hashlib, sys
+print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:12])
+PY
+)"
+RUNTIME_ROOT="${AI_COUNSEL_RUNTIME_ROOT:-${HOME}/.cache/ai-counsel-mcp}"
+RUNTIME_BASE="${RUNTIME_ROOT}/${KEY}"
+
+for d in \
+  "${RUNTIME_BASE}/codex" \
+  "${RUNTIME_BASE}/gemini" \
+  "${RUNTIME_BASE}/opencode/share" \
+  "${RUNTIME_BASE}/opencode/config" \
+  "${RUNTIME_BASE}/claude/dot_claude" \
+  "${RUNTIME_BASE}/claude/claude_code" \
+  "${RUNTIME_BASE}/gcloud"; do
+  mkdir_safe "${d}"
+done
+
+if [[ "${SKIP_AUTH_IMPORT}" -eq 0 ]]; then
+  log "Importing host auth into per-project runtime"
+  sync_auth_dir "${HOME}/.codex" "${RUNTIME_BASE}/codex" "codex"
+  sync_auth_dir "${HOME}/.gemini" "${RUNTIME_BASE}/gemini" "gemini"
+  sync_auth_dir "${HOME}/.local/share/opencode" "${RUNTIME_BASE}/opencode/share" "opencode-share"
+  sync_auth_dir "${HOME}/.config/opencode" "${RUNTIME_BASE}/opencode/config" "opencode-config"
+  sync_auth_dir "${HOME}/.config/gcloud" "${RUNTIME_BASE}/gcloud" "gcloud"
+else
+  log "Skipping auth import (--skip-auth-import)"
+fi
+
+CLAUDE_JSON='{
+  "mcpServers": {
+    "ai-counsel": {
+      "type": "stdio",
+      "command": "mcp-ai-counsel",
+      "args": []
+    }
+  }
+}'
+
+CODEX_TOML='[mcp_servers.ai-counsel]
+command = "mcp-ai-counsel"
+args = []
+'
+
+GEMINI_JSON='{
+  "mcpServers": {
+    "ai-counsel": {
+      "command": "mcp-ai-counsel",
+      "args": []
+    }
+  }
+}'
+
+OPENCODE_JSON='{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ai-counsel": {
+      "type": "local",
+      "command": ["mcp-ai-counsel"],
+      "enabled": true
+    }
+  }
+}'
+
+if contains_client "claude"; then
+  write_config_file "${PROJECT_DIR}/.mcp.json" "json" "${CLAUDE_JSON}" "Claude MCP config"
+fi
+if contains_client "codex"; then
+  write_config_file "${PROJECT_DIR}/.codex/config.toml" "toml" "${CODEX_TOML}" "Codex MCP config"
+fi
+if contains_client "gemini"; then
+  write_config_file "${PROJECT_DIR}/.gemini/settings.json" "json" "${GEMINI_JSON}" "Gemini MCP config"
+fi
+if contains_client "opencode"; then
+  write_config_file "${PROJECT_DIR}/opencode.json" "json" "${OPENCODE_JSON}" "OpenCode MCP config"
+fi
+
+log "Bootstrap complete for ${PROJECT_DIR}"

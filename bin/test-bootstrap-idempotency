@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+BOOTSTRAP="${ROOT}/bin/bootstrap"
+
+TMP_DIR="$(mktemp -d /tmp/ai-counsel-bootstrap-test.XXXXXX)"
+PROJECT_DIR="${TMP_DIR}/project"
+mkdir -p "${PROJECT_DIR}"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+echo "[test] temp project: ${PROJECT_DIR}"
+
+common_flags=(
+  --project-dir "${PROJECT_DIR}"
+  --skip-vendor
+  --skip-build
+  --skip-wrapper
+  --skip-auth-import
+)
+
+export AI_COUNSEL_RUNTIME_ROOT="${TMP_DIR}/runtime-root"
+
+echo "[test] first run"
+"${BOOTSTRAP}" "${common_flags[@]}"
+
+for f in \
+  "${PROJECT_DIR}/.ai-counsel/config.yaml" \
+  "${PROJECT_DIR}/.ai-counsel/env" \
+  "${PROJECT_DIR}/.mcp.json" \
+  "${PROJECT_DIR}/.codex/config.toml" \
+  "${PROJECT_DIR}/.gemini/settings.json" \
+  "${PROJECT_DIR}/opencode.json"; do
+  test -f "${f}" || { echo "[test][error] missing file: ${f}" >&2; exit 1; }
+done
+
+snap() {
+  (cd "${PROJECT_DIR}" && find . -type f ! -name '*.bak.*' -print0 | sort -z | xargs -0 shasum)
+}
+
+before="$(snap)"
+echo "[test] second run (idempotency check)"
+"${BOOTSTRAP}" "${common_flags[@]}"
+after="$(snap)"
+
+if [[ "${before}" != "${after}" ]]; then
+  echo "[test][error] non-idempotent changes detected on second run" >&2
+  exit 1
+fi
+
+echo "[test] force overwrite creates backups"
+"${BOOTSTRAP}" "${common_flags[@]}" --clients claude --force
+
+backup_count="$(find "${PROJECT_DIR}" -name '.mcp.json.bak.*' | wc -l | tr -d ' ')"
+if [[ "${backup_count}" -lt 1 ]]; then
+  echo "[test][error] expected backup file for forced overwrite" >&2
+  exit 1
+fi
+
+echo "[test] dry-run does not mutate"
+before_dry="$(snap)"
+"${BOOTSTRAP}" "${common_flags[@]}" --dry-run
+after_dry="$(snap)"
+if [[ "${before_dry}" != "${after_dry}" ]]; then
+  echo "[test][error] dry-run changed files" >&2
+  exit 1
+fi
+
+echo "[test] PASS"
