@@ -26,6 +26,18 @@ cd ~/src/ai-counsel-mcp-toolbox
 docker build -t ai-counsel-mcp:latest .
 ```
 
+Optional optimized build (same image name/tag if you want to replace the default):
+```bash
+docker build -f Dockerfile.optimized -t ai-counsel-mcp:latest .
+```
+
+Optimized full build (includes heavier ML deps used by advanced convergence backends):
+```bash
+docker build -f Dockerfile.optimized \
+  --build-arg AI_COUNSEL_INCLUDE_HEAVY_DEPS=1 \
+  -t ai-counsel-mcp:latest .
+```
+
 ### 2) Install the global wrapper
 ```bash
 ./bin/install-global-wrapper
@@ -135,4 +147,3 @@ See `docs/EXTENDING.md`.
   - Gemini: `/home/app/.gemini`
   - OpenCode: `/home/app/.local/share/opencode` and `/home/app/.config/opencode`
   - gcloud (optional, for ADC): `/home/app/.config/gcloud`
-

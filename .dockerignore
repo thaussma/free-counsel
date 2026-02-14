@@ -1,0 +1,27 @@
+# VCS and editor noise
+.git
+.gitignore
+.DS_Store
+**/.DS_Store
+.vscode
+.idea
+
+# Local env/runtime artifacts
+.env
+.env.*
+.runtime
+runtime
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+*.log
+
+# Keep vendored source, but trim heavy/non-runtime content from build context
+vendor/ai-counsel/.git
+vendor/ai-counsel/.github
+vendor/ai-counsel/docs
+vendor/ai-counsel/tests
+vendor/ai-counsel/test
+vendor/ai-counsel/.venv
+vendor/ai-counsel/node_modules

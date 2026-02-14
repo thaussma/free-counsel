@@ -1,0 +1,57 @@
+FROM node:22-bookworm-slim AS cli-builder
+
+ENV NPM_CONFIG_PREFIX=/opt/npm-global
+
+# Install Node-based CLIs in a custom prefix, then clean npm cache in-layer.
+RUN npm install -g \
+    @openai/codex \
+    @google/gemini-cli \
+    opencode-ai \
+  && npm cache clean --force \
+  && rm -rf /root/.npm /tmp/*
+
+FROM python:3.11-slim
+
+# Keep final image lean: no apt nodejs/npm in runtime image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -m -u 1000 -s /bin/bash app
+USER app
+ENV HOME=/home/app
+ENV PATH=/home/app/.local/bin:/home/app/.npm-global/bin:${PATH}
+WORKDIR /work
+
+# Copy Node runtime + globally installed CLIs from builder stage.
+COPY --from=cli-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=cli-builder /opt/npm-global /home/app/.npm-global
+
+# Install Python dependencies first for better build cache reuse.
+# Default slim mode excludes optional heavy ML backend deps.
+ARG AI_COUNSEL_INCLUDE_HEAVY_DEPS=0
+COPY --chown=app:app vendor/ai-counsel/requirements.txt /tmp/requirements.txt
+RUN if [ "${AI_COUNSEL_INCLUDE_HEAVY_DEPS}" != "1" ]; then \
+      grep -Ev '^(sentence-transformers|scikit-learn)([<>=!~].*)?$' /tmp/requirements.txt > /tmp/requirements.runtime.txt; \
+    else \
+      cp /tmp/requirements.txt /tmp/requirements.runtime.txt; \
+    fi \
+  && pip install --no-cache-dir -r /tmp/requirements.runtime.txt \
+  && rm -f /tmp/requirements.txt \
+  && rm -f /tmp/requirements.runtime.txt \
+  && rm -rf /home/app/.cache/pip
+
+# Vendored AI Counsel is expected in the build context at vendor/ai-counsel
+COPY --chown=app:app vendor/ai-counsel /opt/ai-counsel
+WORKDIR /opt/ai-counsel
+
+# Default config is mounted in at runtime by wrapper, but we ship one too.
+WORKDIR /work
+COPY --chown=app:app config/ai-counsel/config.yaml /opt/ai-counsel/config.yaml
+
+# Optional extensions (future)
+COPY --chown=app:app extensions /work/extensions
+
+WORKDIR /opt/ai-counsel
+CMD ["python", "-u", "server.py"]

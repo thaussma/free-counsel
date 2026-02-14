@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1000 -s /bin/bash app
 USER app
 ENV HOME=/home/app
+ENV NPM_CONFIG_PREFIX=/home/app/.npm-global
+ENV PATH=/home/app/.local/bin:/home/app/.npm-global/bin:${PATH}
 WORKDIR /work
 
 # Install CLIs
